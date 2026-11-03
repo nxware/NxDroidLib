@@ -116,6 +116,26 @@ categoryAccount.addPreference(Preference(context).apply {
 })
 ```
 
+## REST-API: Dokument mit Datei anlegen
+
+Die NWeb-REST-API ist in `api.json` (OpenAPI 3) beschrieben. Basis ist die gespeicherte NWeb-URL plus `w/api/`, also z. B. `https://bsnx.net/4.0/w/api/`. Die Anmeldung läuft über die Query-Parameter `username` und `password`. `NWebClient.maskUrl` verdeckt das Passwort im Log.
+
+```java
+// blockiert bis zur Antwort, nicht im UI-Thread aufrufen
+JSONObject r = NxDroid.userCreateDocument(context,
+        null,                 // userId; null = über GET /me ermitteln
+        "arscanner",          // kind: arscanner oder data, dann ist die Datei der Inhalt
+        "Wohnzimmer",         // Titel
+        "{\"arscanner\":{\"file\":\"scan.csv\"}}",  // meta, optional
+        new File(path), "text/csv");
+int docId = r.optInt("document_id");
+```
+
+- Ruft `POST /user/{userId}/doc?kind=…&title=…&meta=…` auf.
+- Die Datei wird als roher Request-Body mit dem angegebenen `Content-Type` gestreamt, kein Multipart. Auch große Scans müssen dadurch nicht komplett in den Speicher.
+- Ohne eingerichtetes Konto, bei Netzwerkfehlern oder HTTP-Fehlern wirft die Methode eine `IOException`. Die Meldung enthält den HTTP-Status und den Anfang der Server-Antwort, z. B. `HTTP 403: …`.
+- Direkt nutzbar sind auch `NWebClient.me()` und `NWebClient.userCreateDocument(userId, kind, title, meta, file, contentType)`.
+
 ## Hinweise
 
 - **minSdk 26, compileSdk 34.** `androidx.core` 1.13 verlangt mindestens compileSdk 34. Die Ressourcen der Bibliothek werden gegen die compileSdk der jeweiligen App gelinkt, die App braucht also ebenfalls mindestens 34.

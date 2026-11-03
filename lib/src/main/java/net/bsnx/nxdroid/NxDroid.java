@@ -15,6 +15,7 @@ import androidx.core.content.FileProvider;
 import androidx.core.util.Consumer;
 
 import net.bsnx.NWebClient;
+import net.bsnx.json.JSONObject;
 import net.bsnx.nxdroidlib.NWebAccount;
 
 import java.io.BufferedReader;
@@ -291,6 +292,34 @@ public class NxDroid {
     public static NWebClient client(Context ctx) {
         // Zugangsdaten aus NxDroidLib; leere URL ergibt die Standard-URL
         return new NWebClient(NWebAccount.getUrl(ctx), NWebAccount.getUser(ctx), NWebAccount.getPass(ctx));
+    }
+
+    /**
+     * Legt mit dem gespeicherten NWeb-Konto ein Dokument an (POST /user/{userId}/doc) und laedt
+     * die Datei als Inhalt hoch. Blockiert bis zur Antwort, daher nicht im UI-Thread aufrufen.
+     *
+     * @param userId      ID des Benutzers; null = ueber GET /me ermitteln
+     * @param kind        z.B. "arscanner" oder "data"
+     * @param title       Titel des Dokuments
+     * @param metaJson    optional, {"ns": {"name": value}}
+     * @param file        hochzuladende Datei
+     * @param contentType z.B. "text/csv"
+     * @return Antwort des Servers mit document_id, guid, group_id, data_bytes
+     * @throws IOException ohne eingerichtetes Konto, bei Netzwerk- oder HTTP-Fehlern
+     */
+    public static JSONObject userCreateDocument(Context ctx, String userId, String kind, String title,
+                                                String metaJson, File file, String contentType) throws IOException {
+        if (!NWebAccount.isConfigured(ctx)) {
+            throw new IOException("NWeb-Konto ist nicht eingerichtet");
+        }
+        NWebClient client = client(ctx);
+        if (userId == null || userId.isEmpty()) {
+            userId = client.me().optString("id", "");
+            if (userId.isEmpty()) {
+                throw new IOException("Benutzer-ID konnte nicht ermittelt werden (/me)");
+            }
+        }
+        return client.userCreateDocument(userId, kind, title, metaJson, file, contentType);
     }
 
     /**

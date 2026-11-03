@@ -7,6 +7,8 @@ import net.bsnx.json.JSONObject;
 import net.bsnx.nxdroid.GeoItem;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -233,6 +235,106 @@ public class NWebClient {
             i++;
         }
         return array;
+    }
+
+    // ---------------------------------------------------------------- REST-API w/api (siehe api.json)
+
+    /** Basis der REST-API, z.B. https://bsnx.net/4.0/w/api/ */
+    public String apiUrl() {
+        return (url.endsWith("/") ? url : url + "/") + "w/api/";
+    }
+
+    /** URL fuer einen API-Pfad; Anmeldung laeuft laut API ueber die Query-Parameter username/password. */
+    private String apiUrl(String path, Map<String, String> query) throws IOException {
+        Map<String, String> q = new LinkedHashMap<>();
+        if (query != null) {
+            q.putAll(query);
+        }
+        q.put("username", user);
+        q.put("password", password);
+        StringBuilder sb = new StringBuilder(apiUrl()).append(path);
+        char sep = '?';
+        for (Map.Entry<String, String> e : q.entrySet()) {
+            if (e.getValue() == null) {
+                continue;
+            }
+            sb.append(sep)
+                    .append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8.name()))
+                    .append('=')
+                    .append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8.name()));
+            sep = '&';
+        }
+        return sb.toString();
+    }
+
+    /**
+     * HTTP-Anfrage an die API. body (optional) wird gestreamt gesendet, damit auch grosse Dateien
+     * nicht komplett in den Speicher muessen. Wirft bei Netzwerk- und HTTP-Fehlern eine IOException.
+     */
+    private String apiRequest(String method, String url, File body, String contentType) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            connection.setRequestMethod(method);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("Accept", "application/json");
+            if (body != null) {
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", contentType);
+                connection.setFixedLengthStreamingMode(body.length());
+                try (InputStream in = new FileInputStream(body);
+                     OutputStream out = connection.getOutputStream()) {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                    }
+                }
+            }
+            Log.i(TAG, method + " " + maskUrl(url) + (body != null ? " (" + body.length() + " Bytes)" : ""));
+            int code = connection.getResponseCode();
+            boolean ok = code >= 200 && code < 300;
+            String response = readAll(ok ? connection.getInputStream() : connection.getErrorStream());
+            Log.i(TAG, "HTTP " + code + ", " + response.length() + " Zeichen");
+            logLong("Antwort: ", response);
+            if (!ok) {
+                String detail = response.length() > 200 ? response.substring(0, 200) + "…" : response;
+                if (code == 404) {
+                    throw new FileNotFoundException("HTTP 404: " + maskUrl(url));
+                }
+                throw new IOException("HTTP " + code + (detail.isEmpty() ? "" : ": " + detail));
+            }
+            return response;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    /** GET /me: angemeldeter Benutzer mit id, title, name und doc_ids */
+    public JSONObject me() throws IOException {
+        return new JSONObject(apiRequest("GET", apiUrl("me", null), null, null));
+    }
+
+    /**
+     * POST /user/{userId}/doc: legt im Benutzerbereich ein Dokument an und laedt die Datei als
+     * Inhalt hoch (roher Body mit contentType, kein Multipart).
+     *
+     * @param userId      ID des Benutzers, z.B. aus {@link #me()}
+     * @param kind        z.B. "arscanner" oder "data"; nur dann wird der Body als Dokumentdaten gespeichert
+     * @param title       Titel des Dokuments
+     * @param metaJson    optional, {"ns": {"name": value}} fuer document__meta
+     * @param file        hochzuladende Datei
+     * @param contentType z.B. "text/csv"
+     * @return Antwort des Servers, bei Erfolg mit document_id, guid, group_id und data_bytes
+     */
+    public JSONObject userCreateDocument(String userId, String kind, String title, String metaJson,
+                                         File file, String contentType) throws IOException {
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("kind", kind);
+        q.put("title", title);
+        q.put("meta", metaJson);
+        String url = apiUrl("user/" + URLEncoder.encode(userId, StandardCharsets.UTF_8.name()) + "/doc", q);
+        return new JSONObject(apiRequest("POST", url, file, contentType));
     }
 
     /** Legt einen Marker auf dem Server an. Wirft bei Fehlern eine IOException. */
