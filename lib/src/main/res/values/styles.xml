@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ab Android 10 setzt NWebAccountActivity zur Laufzeit DeviceDefault.DayNight -->
+    <style name="NxDroidLib.Theme" parent="@android:style/Theme.DeviceDefault" />
+</resources>

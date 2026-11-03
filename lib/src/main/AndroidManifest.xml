@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- exported: NxDroid schickt die Kontodaten beim Import an diese Activity zurueck.
+             Uebernommen werden sie erst nach Bestaetigung durch den Nutzer. -->
+        <activity
+            android:name=".NWebAccountActivity"
+            android:exported="true"
+            android:label="NWeb-Konto"
+            android:launchMode="singleTop"
+            android:theme="@style/NxDroidLib.Theme" />
+    </application>
+
+</manifest>

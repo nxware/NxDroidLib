@@ -1,0 +1,24 @@
+// Gemeinsame Bibliothek der NxDroid-Apps (NxMap, arscanner): jlib, json, NxDroid, NWeb-Konto.
+// Wird von den Apps als Unterprojekt eingebunden, siehe README.md.
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace = 'net.bsnx.nxdroidlib'
+    compileSdk = 34
+
+    defaultConfig {
+        minSdk = 26
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    // NxDroid nutzt FileProvider und Consumer; api, weil Consumer in oeffentlichen Methoden vorkommt
+    api 'androidx.core:core:1.13.1'
+}
