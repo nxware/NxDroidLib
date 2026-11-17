@@ -135,6 +135,23 @@ int docId = r.optInt("document_id");
 - Die Datei wird als roher Request-Body mit dem angegebenen `Content-Type` gestreamt, kein Multipart. Auch große Scans müssen dadurch nicht komplett in den Speicher.
 - Ohne eingerichtetes Konto, bei Netzwerkfehlern oder HTTP-Fehlern wirft die Methode eine `IOException`. Die Meldung enthält den HTTP-Status und den Anfang der Server-Antwort, z. B. `HTTP 403: …`.
 - Direkt nutzbar sind auch `NWebClient.me()` und `NWebClient.userCreateDocument(userId, kind, title, meta, file, contentType)`.
+- Für andere `kind`s (z. B. `android`) speichert der Server nur das Formularfeld `content`. Dafür gibt es `NWebClient.userSaveDocument(userId, kind, title, content, guid)`. Mit der `guid` eines eigenen Dokuments wird dieses aktualisiert statt neu angelegt.
+
+## REST-API: Metriken
+
+```java
+// blockiert bis zur Antwort, nicht im UI-Thread aufrufen
+NWebClient client = NxDroid.client(context);
+JSONArray metrics = client.metrics();                 // GET /metrics (Admins: metrics(true) = nur eigene)
+JSONObject m = client.metric(42);                     // GET /metrics/42
+JSONArray values = client.metricValues(42, from, to, 500);  // GET /metrics/42/values, Unix-Zeit in s, null = offen
+client.addMetricValue(42, 21.5);                      // POST /metrics/42/values, Zeitpunkt jetzt
+client.addMetricValue(42, 21.5, 1762600000L);         // mit eigenem Zeitpunkt
+```
+
+- `metrics`/`metric` liefern `id`, `name`, `title`, `unit`, `computed`, `count`, `last_value`, `last_time`.
+- `metricValues` liefert die neuesten `limit` Werte im Zeitraum, aufsteigend sortiert, je mit `value` und `creation`.
+- Fehler kommen als `IOException` mit HTTP-Status, z. B. 403 (nicht Eigentümer) oder 409 beim Schreiben in eine per SQL berechnete Metrik; 404 als `FileNotFoundException`.
 
 ## Hinweise
 

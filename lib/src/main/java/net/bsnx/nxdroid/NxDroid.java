@@ -15,6 +15,7 @@ import androidx.core.content.FileProvider;
 import androidx.core.util.Consumer;
 
 import net.bsnx.NWebClient;
+import net.bsnx.jlib.NetUtils;
 import net.bsnx.json.JSONObject;
 import net.bsnx.nxdroidlib.NWebAccount;
 
@@ -36,6 +37,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class NxDroid {
 
@@ -43,7 +45,7 @@ public class NxDroid {
 
     public static final String PREF_MEMO = "memo";
 
-    private static int threadCount = 0;
+    private static final AtomicInteger threadCount = new AtomicInteger();
 
     public static SharedPreferences getPreference(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(NS, Context.MODE_PRIVATE);
@@ -78,7 +80,6 @@ public class NxDroid {
         Thread t = new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    threadCount++;
                     URL _url = new URL(url);
                     Log.i("url", ""+url);
                     HttpURLConnection connection = (HttpURLConnection) _url.openConnection();
@@ -97,10 +98,11 @@ public class NxDroid {
                     Log.e("url", ""+e.getMessage(), e);
                     //return "Error";
                 } finally {
-                    threadCount--;
+                    threadCount.decrementAndGet();
                 }
             }
         });
+        threadCount.incrementAndGet();
         t.start();
         return t;
     }
@@ -109,7 +111,6 @@ public class NxDroid {
         Thread t = new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    threadCount++;
                     URL _url = new URL(url);
                     Log.i("url", ""+url);
                     HttpURLConnection connection = (HttpURLConnection) _url.openConnection();
@@ -137,10 +138,11 @@ public class NxDroid {
                     Log.e("url", ""+e.getMessage(), e);
                     //return "Error";
                 } finally {
-                    threadCount--;
+                    threadCount.decrementAndGet();
                 }
             }
         });
+        threadCount.incrementAndGet();
         t.start();
         return t;
     }
@@ -149,36 +151,23 @@ public class NxDroid {
         Thread t = new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    threadCount++;
-                    URL _url = new URL(url);
                     Log.i("url", ""+url);
-                    HttpURLConnection connection = (HttpURLConnection) _url.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setDoOutput(true);
-                    connection.setConnectTimeout(5000);
-                    connection.setReadTimeout(5000);
-                    connection.connect();
-                    InputStream is = connection.getInputStream();
-                    FileOutputStream os = new FileOutputStream(filePath);
-                    byte[] buffer = new byte[1024];
-                    int len;
-                    while ((len = is.read(buffer)) != -1) {
-                        os.write(buffer, 0, len);
-                    }
+                    NetUtils.downloadToFile(url, new File(filePath), 5000);
                 } catch (Exception e) {
                     Log.e("url", ""+e.getMessage(), e);
                     //return "Error";
                 } finally {
-                    threadCount--;
+                    threadCount.decrementAndGet();
                 }
             }
         });
+        threadCount.incrementAndGet();
         t.start();
         return t;
     }
 
     public static int getThreadCount() {
-        return threadCount;
+        return threadCount.get();
     }
 
     public static void openUrl(Context ctx, String url) {

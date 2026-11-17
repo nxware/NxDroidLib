@@ -7,6 +7,12 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.Collections;
+import java.nio.charset.StandardCharsets;
+import java.net.NetworkInterface;
+import java.net.InterfaceAddress;
 import java.net.SocketException;
 
 /**
@@ -47,6 +53,38 @@ public class Udp {
 		send(message, "255.255.255.255", toPort);
 	}
 	
+	/**
+	 * Sendet message (UTF-8) als Broadcast an die Broadcast-Adresse jeder aktiven IPv4-Schnittstelle
+	 * (z.B. 192.168.1.255 im WLAN); ohne solche Schnittstelle an 255.255.255.255.
+	 * Blockierend, nicht im UI-Thread aufrufen.
+	 *
+	 * @return Anzahl der Adressen, an die gesendet wurde
+	 */
+	public static int broadcast(String message, int toPort) throws IOException {
+		byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
+		Set<InetAddress> targets = new LinkedHashSet<>();
+		for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+			if (!ni.isUp() || ni.isLoopback()) {
+				continue;
+			}
+			for (InterfaceAddress ia : ni.getInterfaceAddresses()) {
+				if (ia.getBroadcast() != null) {
+					targets.add(ia.getBroadcast());
+				}
+			}
+		}
+		if (targets.isEmpty()) {
+			targets.add(InetAddress.getByName("255.255.255.255"));
+		}
+		try (DatagramSocket s = new DatagramSocket()) {
+			s.setBroadcast(true);
+			for (InetAddress target : targets) {
+				s.send(new DatagramPacket(bytes, bytes.length, target, toPort));
+			}
+		}
+		return targets.size();
+	}
+
 	/**
 	 * Empfaengt ein UDP_Paket
 	 * 

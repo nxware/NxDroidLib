@@ -278,6 +278,55 @@ public class NetUtils {
         	throw new RuntimeException("HTTP response: " + responseCode);
         } 
 	}
+
+	/**
+	 * GET mit Timeout; wirft bei Netzfehler oder HTTP-Status != 200.
+	 */
+	public static String get(String url, int timeoutMs) throws IOException {
+		HttpURLConnection conn = open(url, timeoutMs);
+		try (BufferedReader rd = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+			StringBuilder sb = new StringBuilder();
+			String line;
+			while ((line = rd.readLine()) != null) {
+				sb.append(line).append('\n');
+			}
+			return sb.toString();
+		} finally {
+			conn.disconnect();
+		}
+	}
+
+	/**
+	 * Lädt url nach file; wirft bei Fehler und löscht dann eine halb geschriebene Datei.
+	 */
+	public static void downloadToFile(String url, java.io.File file, int timeoutMs) throws IOException {
+		HttpURLConnection conn = open(url, timeoutMs);
+		try (InputStream is = conn.getInputStream(); FileOutputStream os = new FileOutputStream(file)) {
+			byte[] buffer = new byte[8192];
+			int n;
+			while ((n = is.read(buffer)) != -1) {
+				os.write(buffer, 0, n);
+			}
+		} catch (IOException e) {
+			file.delete();
+			throw e;
+		} finally {
+			conn.disconnect();
+		}
+	}
+
+	private static HttpURLConnection open(String url, int timeoutMs) throws IOException {
+		HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+		conn.setConnectTimeout(timeoutMs);
+		conn.setReadTimeout(timeoutMs);
+		int code = conn.getResponseCode();
+		if (code != HttpURLConnection.HTTP_OK) {
+			conn.disconnect();
+			throw new IOException("HTTP " + code);
+		}
+		return conn;
+	}
+
 	
 	// }}}
 	

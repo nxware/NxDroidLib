@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.ProtocolException;
@@ -267,11 +268,37 @@ public class NWebClient {
         return sb.toString();
     }
 
+    /** Schreibt den Request-Body. */
+    private interface BodyWriter {
+        void write(OutputStream out) throws IOException;
+    }
+
     /**
      * HTTP-Anfrage an die API. body (optional) wird gestreamt gesendet, damit auch grosse Dateien
      * nicht komplett in den Speicher muessen. Wirft bei Netzwerk- und HTTP-Fehlern eine IOException.
      */
     private String apiRequest(String method, String url, File body, String contentType) throws IOException {
+        if (body == null) {
+            return apiRequest(method, url, -1, null, null);
+        }
+        return apiRequest(method, url, body.length(), contentType, out -> {
+            try (InputStream in = new FileInputStream(body)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                }
+            }
+        });
+    }
+
+    /** Wie oben, mit kleinem Body aus dem Speicher (z.B. Formulardaten). */
+    private String apiRequest(String method, String url, byte[] body, String contentType) throws IOException {
+        return apiRequest(method, url, body.length, contentType, out -> out.write(body));
+    }
+
+    /** @param length Laenge des Bodys in Bytes, -1 ohne Body */
+    private String apiRequest(String method, String url, long length, String contentType, BodyWriter body) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         try {
             connection.setRequestMethod(method);
@@ -281,17 +308,12 @@ public class NWebClient {
             if (body != null) {
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Content-Type", contentType);
-                connection.setFixedLengthStreamingMode(body.length());
-                try (InputStream in = new FileInputStream(body);
-                     OutputStream out = connection.getOutputStream()) {
-                    byte[] buf = new byte[64 * 1024];
-                    int n;
-                    while ((n = in.read(buf)) > 0) {
-                        out.write(buf, 0, n);
-                    }
+                connection.setFixedLengthStreamingMode(length);
+                try (OutputStream out = connection.getOutputStream()) {
+                    body.write(out);
                 }
             }
-            Log.i(TAG, method + " " + maskUrl(url) + (body != null ? " (" + body.length() + " Bytes)" : ""));
+            Log.i(TAG, method + " " + maskUrl(url) + (body != null ? " (" + length + " Bytes)" : ""));
             int code = connection.getResponseCode();
             boolean ok = code >= 200 && code < 300;
             String response = readAll(ok ? connection.getInputStream() : connection.getErrorStream());
@@ -312,7 +334,7 @@ public class NWebClient {
 
     /** GET /me: angemeldeter Benutzer mit id, title, name und doc_ids */
     public JSONObject me() throws IOException {
-        return new JSONObject(apiRequest("GET", apiUrl("me", null), null, null));
+        return new JSONObject(apiRequest("GET", apiUrl("me", null), (File) null, null));
     }
 
     /**
@@ -335,6 +357,117 @@ public class NWebClient {
         q.put("meta", metaJson);
         String url = apiUrl("user/" + URLEncoder.encode(userId, StandardCharsets.UTF_8.name()) + "/doc", q);
         return new JSONObject(apiRequest("POST", url, file, contentType));
+    }
+
+    /**
+     * POST /user/{userId}/doc mit Formularfeldern: legt ein Dokument mit content als Inhalt an oder
+     * aktualisiert es, wenn guid zu einem eigenen bestehenden Dokument gehoert. Fuer alle kinds ausser
+     * data/arscanner/compass (dort ist der rohe Body der Inhalt, siehe userCreateDocument).
+     *
+     * @param guid null = neues Dokument mit neuer GUID
+     * @return bei Neuanlage (HTTP 201) op, document_id, guid, group_id; bei Aktualisierung (200) op, data_bytes, meta
+     */
+    public JSONObject userSaveDocument(String userId, String kind, String title, String content, String guid)
+            throws IOException {
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("kind", kind);
+        form.put("title", title);
+        form.put("content", content);
+        if (guid != null && !guid.isEmpty()) {
+            form.put("guid", guid);
+        }
+        StringBuilder body = new StringBuilder();
+        for (Map.Entry<String, String> e : form.entrySet()) {
+            if (body.length() > 0) {
+                body.append('&');
+            }
+            body.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8.name())).append('=')
+                    .append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8.name()));
+        }
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("kind", kind);
+        String url = apiUrl("user/" + URLEncoder.encode(userId, StandardCharsets.UTF_8.name()) + "/doc", q);
+        return new JSONObject(apiRequest("POST", url, body.toString().getBytes(StandardCharsets.UTF_8),
+                "application/x-www-form-urlencoded; charset=UTF-8"));
+    }
+
+    // ---------------------------------------------------------------- Metriken (/metrics*)
+
+    /**
+     * GET /metrics: Metriken des angemeldeten Benutzers. Admins bekommen alle, mit mine=true nur die eigenen.
+     *
+     * @return Array aus Objekten mit id, name, title, unit, computed, count, last_value, last_time (Unix-Zeit)
+     */
+    public JSONArray metrics(boolean mine) throws IOException {
+        Map<String, String> q = new LinkedHashMap<>();
+        if (mine) {
+            q.put("mine", "1");
+        }
+        return new JSONArray(apiRequest("GET", apiUrl("metrics", q), (File) null, null));
+    }
+
+    /** GET /metrics ohne Einschraenkung auf eigene Metriken. */
+    public JSONArray metrics() throws IOException {
+        return metrics(false);
+    }
+
+    /**
+     * GET /metrics/{metricId}: eine Metrik.
+     *
+     * @param metricId Dokument-ID der Metrik (kind=metric)
+     * @return Objekt mit id, name, title, unit, computed, count, last_value, last_time
+     * @throws FileNotFoundException wenn es die Metrik nicht gibt (HTTP 404)
+     * @throws IOException           u.a. HTTP 403, wenn sie einem anderen Benutzer gehoert
+     */
+    public JSONObject metric(int metricId) throws IOException {
+        return new JSONObject(apiRequest("GET", apiUrl("metrics/" + metricId, null), (File) null, null));
+    }
+
+    /**
+     * GET /metrics/{metricId}/values: die neuesten limit Werte im Zeitraum, aufsteigend nach Zeit sortiert.
+     *
+     * @param from  Unix-Zeit in Sekunden, inklusive; null = ohne Untergrenze
+     * @param to    Unix-Zeit in Sekunden, inklusive; null = ohne Obergrenze
+     * @param limit max. Anzahl (Server: Standard 1000, hoechstens 10000); null = Standard
+     * @return Array aus Objekten mit value und creation (Unix-Zeit)
+     */
+    public JSONArray metricValues(int metricId, Long from, Long to, Integer limit) throws IOException {
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("from", from == null ? null : String.valueOf(from));
+        q.put("to", to == null ? null : String.valueOf(to));
+        q.put("limit", limit == null ? null : String.valueOf(limit));
+        return new JSONArray(apiRequest("GET", apiUrl("metrics/" + metricId + "/values", q), (File) null, null));
+    }
+
+    /** GET /metrics/{metricId}/values mit Server-Standardwerten (neueste 1000 Werte). */
+    public JSONArray metricValues(int metricId) throws IOException {
+        return metricValues(metricId, null, null, null);
+    }
+
+    /**
+     * POST /metrics/{metricId}/values: fuegt einen Wert hinzu.
+     *
+     * @param creation Unix-Zeit in Sekunden; null = jetzt (setzt der Server)
+     * @return Antwort mit success, metric, value, creation
+     * @throws IOException u.a. HTTP 400 (ungueltiger Wert), 403 (nicht Eigentuemer), 409 (per SQL berechnete Metrik)
+     */
+    public JSONObject addMetricValue(int metricId, double value, Long creation) throws IOException {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            throw new IllegalArgumentException("value must be a finite number: " + value);
+        }
+        StringBuilder form = new StringBuilder("value=")
+                .append(URLEncoder.encode(BigDecimal.valueOf(value).toPlainString(), StandardCharsets.UTF_8.name()));
+        if (creation != null) {
+            form.append("&creation=").append(creation);
+        }
+        byte[] body = form.toString().getBytes(StandardCharsets.UTF_8);
+        return new JSONObject(apiRequest("POST", apiUrl("metrics/" + metricId + "/values", null), body,
+                "application/x-www-form-urlencoded; charset=UTF-8"));
+    }
+
+    /** POST /metrics/{metricId}/values mit Zeitpunkt jetzt. */
+    public JSONObject addMetricValue(int metricId, double value) throws IOException {
+        return addMetricValue(metricId, value, null);
     }
 
     /** Legt einen Marker auf dem Server an. Wirft bei Fehlern eine IOException. */
